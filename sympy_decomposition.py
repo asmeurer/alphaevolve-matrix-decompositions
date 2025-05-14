@@ -114,29 +114,28 @@ def print_latex_document(latex_steps: list[str], title: str = "Matrix Multiplica
         r"\setlength{\mathindent}{0pt}",  # Reduce indentation in math environments
         r"\setlength{\textwidth}{6.5in}",  # Adjust text width
         r"\setlength{\columnwidth}{6in}",  # Adjust column width for breqn
-        
+
         # Allow line breaking within math expressions
         r"\allowdisplaybreaks[4]",
-        
+
         # Enable long equation breaking at operators
         r"\interdisplaylinepenalty=2500",
-        
-        r"\title{" + sympy.latex(title) + (f" ({multiplications} Multiplications)" if multiplications is not None else "") +r"}",
-        r"\author{Tensor Decomposition Converter}",
-        r"\date{\today}",
+
+        r"\title{" + title + (f" ({multiplications} multiplications)" if multiplications is not None else "") +r"}",
+        r"\date{}",
         r"\begin{document}",
         r"\maketitle"
     ]
-    
+
     # We'll use dmath* from breqn instead of align*
     # This automatically breaks long equations
     doc.append(r"% Equation steps:")
-    
+
     for step_latex in latex_steps:
         if step_latex.startswith("%"): # LaTeX comments
             doc.append(f"{step_latex}")
             continue
-            
+
         # Extract left and right parts of the equation (separated by &=)
         if "&=" in step_latex:
             left_side, right_side = step_latex.split("&=", 1)
@@ -148,7 +147,7 @@ def print_latex_document(latex_steps: list[str], title: str = "Matrix Multiplica
             doc.append(r"\begin{dmath*}")
             doc.append(step_latex)
             doc.append(r"\end{dmath*}")
-    
+
     doc.append(r"\end{document}")
     return "\n".join(doc)
 
@@ -257,7 +256,7 @@ def main():
 
     decomposition_data = None
     n_val, m_val, p_val, rank_val = args.n, args.m, args.p, args.rank
-    title = "Matrix Multiplication Algorithm"
+    title = "Matrix multiplication decomposition"
 
     # --- Load Decomposition ---
     if args.example:
@@ -319,7 +318,7 @@ def main():
             print(f"Error: Variable '{decomp_var_name_to_load}' not found in {args.decomp_file}.", file=sys.stderr)
             return 1
         decomposition_data = getattr(custom_module, decomp_var_name_to_load)
-        title = f"Algorithm from {os.path.basename(args.decomp_file)} ({decomp_var_name_to_load})"
+        title = fr"$\langle{n_val},{m_val},{p_val}\rangle$ decomposition"
 
     else:
         parser.print_help()
@@ -412,30 +411,30 @@ def main():
         # Use SymPy's pretty printing instead of LaTeX output
         if not args.show_counts and not args.verify:
             print(f"\n--- {title} ({algo_data['total_algo_multiplications']} Multiplications) ---")
-            
+
             # Print intermediate products
             print("\nIntermediate products M_r:")
             for r_idx in range(algo_data['total_algo_multiplications']):
                 if r_idx < len(algo_data['M_symbols']):
                     current_M_sym = algo_data['M_symbols'][r_idx]
                     current_M_def = algo_data['M_def_exprs'][r_idx]
-                    
+
                     # Only print if the expression isn't zero
                     if current_M_def != sympy.S.Zero:
                         print(f"\nM_{r_idx} =")
                         sympy.pprint(current_M_def)
-            
+
             # Print C matrix elements
             print("\nElements of C = A B:")
             C_matrix = algo_data['C_matrix_expr']
-            
+
             for i in range(n_val):
                 for j in range(p_val):
                     c_elem = C_matrix[i, j]
                     if c_elem != sympy.S.Zero:
                         print(f"\nC[{i},{j}] =")
                         sympy.pprint(c_elem)
-            
+
             print("\n------------------------------------------------")
 
     # --- Optional Steps ---
