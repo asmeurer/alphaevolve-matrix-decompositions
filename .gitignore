@@ -1,0 +1,6 @@
+*.out
+*.tex
+*.pdf
+*.aux
+*.log
+__pycache__/
