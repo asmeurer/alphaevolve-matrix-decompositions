@@ -353,7 +353,8 @@ def main():
 
     algo_data = tensor_decomposition_to_algorithm_data(decomposition_data_np, n_val, m_val, p_val, rank_val)
 
-    # --- Output LaTeX ---
+    # --- Process and output algorithm data ---
+    # Generate LaTeX content for compilation if needed
     latex_content = print_latex_document(
         algo_data['latex_steps'],
         title,
@@ -367,52 +368,75 @@ def main():
                 f.write(latex_content)
             print(f"LaTeX algorithm written to {tex_filename}")
 
-            if args.compile_latex:
-                print(f"Attempting to compile {tex_filename} with {args.latex_compiler}...")
-                # For Windows, shell=True might be needed if pdflatex is not directly in PATH in a complex way
-                # but generally, direct command is better.
-                # Use a temporary directory for compilation to keep main dir clean from aux files.
-                # However, for simplicity here, compiling in current dir.
-                # On Linux/macOS, os.path.dirname(os.path.abspath(tex_filename)) or "." is fine for cwd
+            print(f"Attempting to compile {tex_filename} with {args.latex_compiler}...")
+            # For Windows, shell=True might be needed if pdflatex is not directly in PATH in a complex way
+            # but generally, direct command is better.
+            # Use a temporary directory for compilation to keep main dir clean from aux files.
+            # However, for simplicity here, compiling in current dir.
+            # On Linux/macOS, os.path.dirname(os.path.abspath(tex_filename)) or "." is fine for cwd
 
-                # Compile twice
-                success = False
-                for i in range(2):
-                    compile_process = subprocess.run(
-                        [args.latex_compiler, "-interaction=nonstopmode", tex_filename],
-                        capture_output=True, text=True,
-                        cwd=os.path.dirname(os.path.abspath(tex_filename)) or "." # Run in file's dir
-                    )
-                    if compile_process.returncode == 0:
-                        success = True
-                    else:
-                        success = False
-                        break # Stop if first pass fails
-
-                if success:
-                    pdf_filename = tex_filename.replace(".tex", ".pdf")
-                    print(f"Compilation successful. Output: {pdf_filename}")
+            # Compile twice
+            success = False
+            for i in range(2):
+                compile_process = subprocess.run(
+                    [args.latex_compiler, "-interaction=nonstopmode", tex_filename],
+                    capture_output=True, text=True,
+                    cwd=os.path.dirname(os.path.abspath(tex_filename)) or "." # Run in file's dir
+                )
+                if compile_process.returncode == 0:
+                    success = True
                 else:
-                    print(f"LaTeX compilation failed (return code {compile_process.returncode}).", file=sys.stderr)
-                    print("stdout:\n" + compile_process.stdout, file=sys.stderr)
-                    print("stderr:\n" + compile_process.stderr, file=sys.stderr)
-                    log_filename = tex_filename.replace(".tex", ".log")
-                    if os.path.exists(log_filename):
-                        print(f"\n--- Contents of {log_filename} (last 2000 chars) ---", file=sys.stderr)
-                        try:
-                            with open(log_filename, 'r') as log_f:
-                                log_content = log_f.read()
-                                print(log_content[-2000:], file=sys.stderr)
-                        except Exception as log_e:
-                            print(f"Error reading log file: {log_e}", file=sys.stderr)
+                    success = False
+                    break # Stop if first pass fails
+
+            if success:
+                pdf_filename = tex_filename.replace(".tex", ".pdf")
+                print(f"Compilation successful. Output: {pdf_filename}")
+            else:
+                print(f"LaTeX compilation failed (return code {compile_process.returncode}).", file=sys.stderr)
+                print("stdout:\n" + compile_process.stdout, file=sys.stderr)
+                print("stderr:\n" + compile_process.stderr, file=sys.stderr)
+                log_filename = tex_filename.replace(".tex", ".log")
+                if os.path.exists(log_filename):
+                    print(f"\n--- Contents of {log_filename} (last 2000 chars) ---", file=sys.stderr)
+                    try:
+                        with open(log_filename, 'r') as log_f:
+                            log_content = log_f.read()
+                            print(log_content[-2000:], file=sys.stderr)
+                    except Exception as log_e:
+                        print(f"Error reading log file: {log_e}", file=sys.stderr)
         except IOError as e:
             print(f"Error writing to {tex_filename}: {e}", file=sys.stderr)
             return 1
     else:
+        # Use SymPy's pretty printing instead of LaTeX output
         if not args.show_counts and not args.verify:
-            print("\n--- LaTeX Output ---")
-            print(latex_content)
-            print("--------------------")
+            print(f"\n--- {title} ({algo_data['total_algo_multiplications']} Multiplications) ---")
+            
+            # Print intermediate products
+            print("\nIntermediate products M_r:")
+            for r_idx in range(algo_data['total_algo_multiplications']):
+                if r_idx < len(algo_data['M_symbols']):
+                    current_M_sym = algo_data['M_symbols'][r_idx]
+                    current_M_def = algo_data['M_def_exprs'][r_idx]
+                    
+                    # Only print if the expression isn't zero
+                    if current_M_def != sympy.S.Zero:
+                        print(f"\nM_{r_idx} =")
+                        sympy.pprint(current_M_def)
+            
+            # Print C matrix elements
+            print("\nElements of C = A B:")
+            C_matrix = algo_data['C_matrix_expr']
+            
+            for i in range(n_val):
+                for j in range(p_val):
+                    c_elem = C_matrix[i, j]
+                    if c_elem != sympy.S.Zero:
+                        print(f"\nC[{i},{j}] =")
+                        sympy.pprint(c_elem)
+            
+            print("\n------------------------------------------------")
 
     # --- Optional Steps ---
     if args.show_counts:
