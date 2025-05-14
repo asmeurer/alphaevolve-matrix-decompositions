@@ -245,7 +245,7 @@ def main():
                         choices=["strassen", "minimal_float", "standard_121"],
                         help="Run a built-in example from my_decompositions.py (requires the file).")
 
-    parser.add_argument("--output-file", "-o", type=str, default='out', help="Base name for output .tex file (e.g., 'my_algo').")
+    parser.add_argument("--output-file", "-o", type=str, help="Base name for output .tex file (e.g., 'my_algo'). If not specified, uses the same basename as the input file.")
     parser.add_argument("--verify", action='store_true', help="Perform symbolic verification of the decomposition.")
     parser.add_argument("--compile-latex", action='store_true', help="Attempt to compile the .tex file to .pdf.")
     parser.add_argument("--latex-compiler", type=str, default="pdflatex", help="LaTeX compiler command.")
@@ -360,8 +360,21 @@ def main():
         multiplications=algo_data['total_algo_multiplications']
     )
 
+    # Determine output file basename
+    if args.output_file:
+        output_basename = args.output_file
+    elif args.decomp_file:
+        # Use the same basename as the input file
+        output_basename = os.path.splitext(os.path.basename(args.decomp_file))[0]
+    elif args.example:
+        # Use the example name
+        output_basename = args.example
+    else:
+        # Fallback for other cases
+        output_basename = 'out'
+
     if args.compile_latex:
-        tex_filename = args.output_file if args.output_file.endswith(".tex") else args.output_file + ".tex"
+        tex_filename = output_basename if output_basename.endswith(".tex") else output_basename + ".tex"
         try:
             with open(tex_filename, "w") as f:
                 f.write(latex_content)
