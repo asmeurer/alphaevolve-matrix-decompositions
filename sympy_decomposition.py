@@ -3,53 +3,34 @@ import numpy as np
 import argparse
 import importlib.util
 import os
+import subprocess
+import sys
 
 def _get_sym_coeff(val):
-    """Converts a number to a SymPy Rational or Integer."""
+    """Converts a number to a SymPy exact Rational or Integer using nsimplify for floats."""
     if isinstance(val, (float, np.floating)):
-        # Convert float to SymPy Rational for exact representation
-        return sympy.Rational(float(val))
-    # Convert other types (like int, np.int) to SymPy Integer or appropriate type
-    return sympy.S(val)
+        # nsimplify to find a simple symbolic representation (like fractions) for input float coefficients
+        simplified_val = sympy.nsimplify(val, rational=True)
+        # nsimplify might return a sympy.Float if it can't find a simple rational.
+        # In that case, fall back to direct Rational conversion.
+        if isinstance(simplified_val, sympy.Float):
+            return sympy.Rational(float(val))
+        return simplified_val
+    return sympy.S(val) # For integers, np.int, etc.
 
-def tensor_decomposition_to_latex_algorithm(
+def tensor_decomposition_to_algorithm_data(
     decomposition: tuple[np.ndarray, np.ndarray, np.ndarray],
     n: int, m: int, p: int, rank: int
-) -> list[str]:
+) -> dict:
     """
-    Converts a tensor decomposition for matrix multiplication into a list of
-    LaTeX strings representing the algorithm.
-
-    Args:
-      decomposition: Tuple of 3 factor matrices (U, V, W) with float/int entries.
-        U (factor_matrix_1) shape (n*m, rank).
-        V (factor_matrix_2) shape (m*p, rank).
-        W (factor_matrix_3) shape (p*n, rank).
-      n: Rows in matrix A.
-      m: Columns in A / Rows in B.
-      p: Columns in matrix B.
-      rank: Rank of the decomposition.
-
-    Returns:
-      A list of strings, where each string is a line of LaTeX code
-      (either a comment or an equation) for the algorithm.
+    Converts a tensor decomposition for matrix multiplication into symbolic
+    expressions and LaTeX strings. Uses ImmutableMatrix.
     """
     factor_matrix_U, factor_matrix_V, factor_matrix_W = decomposition
 
-    # Basic validation
-    expected_U_shape = (n * m, rank)
-    if factor_matrix_U.shape != expected_U_shape:
-        raise ValueError(f'Expected U shape {expected_U_shape}, got {factor_matrix_U.shape}')
-    expected_V_shape = (m * p, rank)
-    if factor_matrix_V.shape != expected_V_shape:
-        raise ValueError(f'Expected V shape {expected_V_shape}, got {factor_matrix_V.shape}')
-    expected_W_shape = (p * n, rank)
-    if factor_matrix_W.shape != expected_W_shape:
-        raise ValueError(f'Expected W shape {expected_W_shape}, got {factor_matrix_W.shape}')
-
     A_sym = sympy.MatrixSymbol('A', n, m)
     B_sym = sympy.MatrixSymbol('B', m, p)
-    C_sym = sympy.MatrixSymbol('C', n, p)
+    C_sym = sympy.MatrixSymbol('C', n, p) # Used for LaTeX representation of C_ik
 
     if rank == 0:
         M_symbols = tuple()
@@ -59,195 +40,387 @@ def tensor_decomposition_to_latex_algorithm(
         M_symbols = sympy.symbols(f'M_0:{rank}')
 
     latex_steps = ["% Intermediate products M_r:"]
+    L_exprs_list = []
+    S_exprs_list = []
+    M_def_exprs_list = [] # Stores L_r * S_r symbolic expressions
 
     for r_idx in range(rank):
         current_M_sym = M_symbols[r_idx]
 
-        # L_r = sum_{i,j} U[i*m+j, r_idx] * A_ij
         L_r_expr = sympy.S.Zero
         for i_row_A in range(n):
             for j_col_A in range(m):
                 coeff_val = factor_matrix_U[i_row_A * m + j_col_A, r_idx]
-                sym_coeff = _get_sym_coeff(coeff_val)
+                sym_coeff = _get_sym_coeff(coeff_val) # nsimplify applied here to individual coeffs
                 if sym_coeff != 0:
                     L_r_expr += sym_coeff * A_sym[i_row_A, j_col_A]
-        L_r_expr = sympy.expand(L_r_expr) # Expand to show sums clearly
+        # L_r_expr = sympy.expand(L_r_expr)
+        L_exprs_list.append(L_r_expr)
 
-        # S_r = sum_{j,k} V[j*p+k, r_idx] * B_jk
         S_r_expr = sympy.S.Zero
         for j_row_B in range(m):
             for k_col_B in range(p):
                 coeff_val = factor_matrix_V[j_row_B * p + k_col_B, r_idx]
-                sym_coeff = _get_sym_coeff(coeff_val)
+                sym_coeff = _get_sym_coeff(coeff_val) # nsimplify applied here
                 if sym_coeff != 0:
                     S_r_expr += sym_coeff * B_sym[j_row_B, k_col_B]
-        S_r_expr = sympy.expand(S_r_expr) # Expand for clarity
+        # S_r_expr = sympy.expand(S_r_expr)
+        S_exprs_list.append(S_r_expr)
+
+        M_r_def_expr = L_r_expr * S_r_expr
+        M_def_exprs_list.append(M_r_def_expr)
 
         if L_r_expr == sympy.S.Zero or S_r_expr == sympy.S.Zero:
             latex_steps.append(f"{sympy.latex(current_M_sym)} &= 0")
             if L_r_expr == sympy.S.Zero and S_r_expr == sympy.S.Zero:
-                 latex_steps.append(f"% \\quad (L_{r_idx} \\text{{ and }} S_{r_idx} \\text{{ terms were zero}})")
+                 latex_steps.append(f"% \\quad (L_{{{r_idx}}} \\text{{ and }} S_{{{r_idx}}} \\text{{ terms were zero}})")
             elif L_r_expr == sympy.S.Zero:
-                latex_steps.append(f"% \\quad (L_{r_idx} \\text{{ term was zero}})")
-            else: # S_r_expr == sympy.S.Zero
-                latex_steps.append(f"% \\quad (S_{r_idx} \\text{{ term was zero}})")
+                latex_steps.append(f"% \\quad (L_{{{r_idx}}} \\text{{ term was zero}})")
+            else:
+                latex_steps.append(f"% \\quad (S_{{{r_idx}}} \\text{{ term was zero}})")
         else:
-            # Using expand for L_r and S_r, but not for the product itself unless it's simple
-            # sympy.latex can produce very long lines if not careful with complex products
-            term_L = f"({sympy.latex(L_r_expr)})"
-            term_S = f"({sympy.latex(S_r_expr)})"
-            latex_steps.append(f"{sympy.latex(current_M_sym)} &= {term_L} {term_S}")
-            
+            latex_steps.append(f"{sympy.latex(current_M_sym)} &= {sympy.latex(M_r_def_expr)}")
 
     latex_steps.append("% Compute elements of C = A B:")
+    C_elements_expr_list = [] # Will store symbolic expressions for each C_ik
     for i_row_C in range(n):
         for k_col_C in range(p):
-            C_ik_expr = sympy.S.Zero
+            C_ik_expr_from_M = sympy.S.Zero
             has_any_term = False
             for r_idx in range(rank):
                 coeff_val = factor_matrix_W[k_col_C * n + i_row_C, r_idx]
-                sym_coeff = _get_sym_coeff(coeff_val)
+                sym_coeff = _get_sym_coeff(coeff_val) # nsimplify applied here
                 if sym_coeff != 0:
                     has_any_term = True
-                    C_ik_expr += sym_coeff * M_symbols[r_idx]
-            
-            C_ik_expr_simplified = sympy.expand(C_ik_expr) # Expand for sum of M terms
+                    if rank > 0 : # Ensure M_symbols[r_idx] is valid
+                        C_ik_expr_from_M += sym_coeff * M_symbols[r_idx]
 
-            if C_ik_expr_simplified != sympy.S.Zero or has_any_term : # Show C_ik = 0 if all W coeffs are zero but it's part of C
-                 latex_steps.append(f"{sympy.latex(C_sym[i_row_C, k_col_C])} &= {sympy.latex(C_ik_expr_simplified)}")
-            # else: # If all W coefficients for this C_ik are zero, it's implicitly zero.
-            #    pass # Or explicitly add latex_steps.append(f"{sympy.latex(C_sym[i_row_C, k_col_C])} &= 0") if desired
+            C_ik_expr_from_M_expanded = sympy.expand(C_ik_expr_from_M)
+            C_elements_expr_list.append(C_ik_expr_from_M_expanded)
 
-    return latex_steps
+            # For LaTeX, use C_sym with indices
+            if C_ik_expr_from_M_expanded != sympy.S.Zero or has_any_term:
+                 latex_steps.append(f"{sympy.latex(C_sym[i_row_C, k_col_C])} &= {sympy.latex(C_ik_expr_from_M_expanded)}")
 
-def print_latex_document(latex_steps: list[str], title: str = "Matrix Multiplication Algorithm"):
-    """Prints a full LaTeX document structure around the algorithm steps."""
-    print(r"\documentclass{article}")
-    print(r"\usepackage{amsmath}")
-    print(r"\usepackage{amsfonts}") % For \mathbb symbols if any (not used here but good practice)
-    print(r"\title{" + title + "}")
-    print(r"\author{Tensor Decomposition Converter}")
-    print(r"\date{\today}")
-    print(r"\begin{document}")
-    print(r"\maketitle")
-    print(r"\begin{align*}")
+    # Create an ImmutableMatrix of the symbolic expressions for C_ik
+    C_matrix_expr_from_M = sympy.ImmutableMatrix(n, p, C_elements_expr_list)
+
+    return {
+        'latex_steps': latex_steps,
+        'L_exprs': L_exprs_list,
+        'S_exprs': S_exprs_list,
+        'M_def_exprs': M_def_exprs_list,
+        'C_matrix_expr': C_matrix_expr_from_M,
+        'A_sym': A_sym, 'B_sym': B_sym, 'C_sym': C_sym, 'M_symbols': M_symbols,
+        'total_algo_multiplications': rank
+    }
+
+def print_latex_document(latex_steps: list[str], title: str = "Matrix Multiplication Algorithm", multiplications: int = None):
+    # ... (same as before) ...
+    doc = [
+        r"\documentclass{article}",
+        r"\usepackage{amsmath}",
+        r"\usepackage{amsfonts}",
+        r"\usepackage{geometry}",
+        r"\geometry{a4paper, margin=1in}",
+        r"\title{" + sympy.latex(title) + (f" ({multiplications} Multiplications)" if multiplications is not None else "") +r"}",
+        r"\author{Tensor Decomposition Converter}",
+        r"\date{\today}",
+        r"\begin{document}",
+        r"\maketitle",
+        r"\begin{align*}"
+    ]
     for step_latex in latex_steps:
-        if step_latex.startswith("%"):
-            # LaTeX comments, or could use \text{} if it needs to be in math mode and visible
-            print(f"  {step_latex}")
-        else:
-            print(f"  {step_latex} \\\\")
-    print(r"\end{align*}")
-    print(r"\end{document}")
+        if step_latex.startswith("%"): # LaTeX comments
+            doc.append(f"  {step_latex}")
+        else: # Algorithm steps
+            doc.append(f"  {step_latex} \\\\") # Add \\ for line breaks in align*
+    doc.extend([
+        r"\end{align*}",
+        r"\end{document}"
+    ])
+    return "\n".join(doc)
+
+
+def verify_symbolically(n: int, m: int, p: int, algo_data: dict):
+    """
+    Symbolically verifies if the decomposition correctly reconstructs A*B.
+    Uses as_explicit() for matrix products.
+    """
+    print("\n--- Symbolic Verification ---")
+    A_sym = algo_data['A_sym']
+    B_sym = algo_data['B_sym']
+    M_symbols = algo_data['M_symbols']
+    L_exprs = algo_data['L_exprs']
+    S_exprs = algo_data['S_exprs']
+    C_matrix_expr_from_M = algo_data['C_matrix_expr'] # This is an ImmutableMatrix of C_ik = sum W_coeff * M_k
+
+    rank_val = algo_data['total_algo_multiplications'] # Use the rank from algo_data
+
+    if rank_val == 0:
+        M_substitutions = {}
+    else:
+        # M_def_exprs already contains L_r * S_r
+        M_substitutions = {M_symbols[r]: algo_data['M_def_exprs'][r] for r in range(rank_val)}
+
+    # Substitute M_k = L_k * S_k into the C_matrix expressions
+    C_algo_substituted = C_matrix_expr_from_M.subs(M_substitutions)
+
+    # Now fully expand this to compare with standard matrix product
+    # C_algo_substituted should be an ImmutableMatrix of expressions.
+    # We need to expand each element.
+    C_algo_fully_expanded_list = [sympy.expand(elem) for elem in C_algo_substituted]
+    C_algo_fully_expanded = sympy.ImmutableMatrix(n, p, C_algo_fully_expanded_list)
+
+    # Standard matrix product, converted to an explicit matrix of expressions
+    C_standard_matrix_prod = A_sym * B_sym
+    C_standard_explicit = C_standard_matrix_prod.as_explicit()
+    C_standard_fully_expanded_list = [sympy.expand(elem) for elem in C_standard_explicit]
+    C_standard_fully_expanded = sympy.ImmutableMatrix(n, p, C_standard_fully_expanded_list)
+
+
+    # Ensure comparison is between fully expanded forms
+    diff_matrix = sympy.simplify(C_algo_fully_expanded - C_standard_fully_expanded)
+
+    is_correct = (diff_matrix == sympy.zeros(n, p))
+    if is_correct:
+        print("Symbolic verification successful: Decomposition correctly reconstructs A * B.")
+    else:
+        print("Symbolic verification FAILED.")
+        print("Algorithm's C (fully expanded):")
+        sympy.pprint(C_algo_fully_expanded)
+        print("Standard A*B (fully expanded):")
+        sympy.pprint(C_standard_fully_expanded)
+        print("Difference (Algorithm C - Standard A*B) simplified:")
+        sympy.pprint(diff_matrix)
+    return is_correct
+
+def count_multiplications_in_steps(algo_data: dict):
+    """Counts sympy.Mul instances using ImmutableMatrix's .count() method."""
+    # ... (same as before, but ensure C_matrix_expr is ImmutableMatrix)
+    print("\n--- Multiplication Counts (SymPy Internal) ---")
+    print(f"Algorithm 'rank' (primary multiplications M_r = L_r * S_r): {algo_data['total_algo_multiplications']}")
+
+    l_muls = sum(expr.count(sympy.Mul) for expr in algo_data['L_exprs'])
+    s_muls = sum(expr.count(sympy.Mul) for expr in algo_data['S_exprs'])
+
+    # M_def_exprs are L_r * S_r.
+    # The .count(Mul) on L_r*S_r will count 1 if L_r and S_r are not 0 or 1,
+    # plus any Muls within L_r or S_r if they weren't fully expanded or had products.
+    # Since L_r and S_r are expanded sums, this count should mostly reflect the outer product.
+    m_prod_muls_in_defs = sum(expr.count(sympy.Mul) for expr in algo_data['M_def_exprs'])
+
+    # C_matrix_expr is an ImmutableMatrix. Sum counts over its elements.
+    c_assembly_muls = sum(elem.count(sympy.Mul) for elem in algo_data['C_matrix_expr'])
+
+    # These counts are more about coefficient multiplications if not +/-1
+    # print(f"  Scalar muls in L_r sums: {l_muls}")
+    # print(f"  Scalar muls in S_r sums: {s_muls}")
+    # print(f"  Scalar muls in C_ik sums (W_coeff * M_r): {c_assembly_muls}")
+    # print(f"  Total SymPy.Mul in M_r definitions (L_r * S_r): {m_prod_muls_in_defs}")
+    # The meaningful "multiplication count" for algorithm comparison is algo_data['total_algo_multiplications'] (the rank).
+
 
 def main():
-    parser = argparse.ArgumentParser(description="Convert tensor decomposition of matrix multiplication to LaTeX algorithm.")
-    parser.add_argument("--decomp_file", type=str, help="Path to Python file containing the decomposition tuple (U, V, W).")
-    parser.add_argument("--decomp_var", type=str, help="Name of the variable holding the decomposition tuple in the file.")
-    parser.add_argument("--metadata_var", type=str, help="Name of the variable holding a dict with n, m, p, rank in the file (optional).")
-    
-    # Manual specification if metadata_var is not provided or for override
+    parser = argparse.ArgumentParser(description="Convert tensor decomposition to LaTeX algorithm and optionally verify/compile.")
+    # ... (Arguments same as before) ...
+    parser.add_argument("--decomp_file", type=str, help="Path to Python file with decomposition data.")
+    parser.add_argument("--decomp_var", type=str, help="Variable name for the (U,V,W) tuple in the file.")
     parser.add_argument("--n", type=int, help="Dimension n (rows of A).")
     parser.add_argument("--m", type=int, help="Dimension m (cols of A / rows of B).")
     parser.add_argument("--p", type=int, help="Dimension p (cols of B).")
-    parser.add_argument("--rank", type=int, help="Rank of the decomposition (optional, can be inferred if not provided via metadata).")
+    parser.add_argument("--rank", type=int, help="Rank of the decomposition.")
 
-    parser.add_argument("--example", type=str, choices=["strassen_float", "minimal_float", "standard_121"], 
+    parser.add_argument("--example", type=str,
+                        choices=["strassen", "minimal_float", "standard_121"],
                         help="Run a built-in example from my_decompositions.py (requires the file).")
+
+    parser.add_argument("--output_file", "-o", type=str, help="Base name for output .tex file (e.g., 'my_algo').")
+    parser.add_argument("--verify", action='store_true', help="Perform symbolic verification of the decomposition.")
+    parser.add_argument("--compile_latex", action='store_true', help="Attempt to compile the .tex file to .pdf.")
+    parser.add_argument("--latex_compiler", type=str, default="pdflatex", help="LaTeX compiler command.")
+    parser.add_argument("--show_counts", action='store_true', help="Show detailed SymPy multiplication counts.")
 
 
     args = parser.parse_args()
 
-    decomposition = None
-    n_val, m_val, p_val, rank_val = None, None, None, None
+    decomposition_data = None
+    n_val, m_val, p_val, rank_val = args.n, args.m, args.p, args.rank
     title = "Matrix Multiplication Algorithm"
 
+    # --- Load Decomposition ---
     if args.example:
         if not os.path.exists("my_decompositions.py"):
-            print("Error: my_decompositions.py not found. This file is required for examples.")
-            return
-        
+            print("Error: my_decompositions.py not found (required for --example).", file=sys.stderr)
+            return 1
+
         spec = importlib.util.spec_from_file_location("my_decompositions_module", "my_decompositions.py")
         decompositions_module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(decompositions_module)
 
-        if args.example == "strassen_float":
-            decomposition = decompositions_module.strassen_prompt_decomposition_float
-            metadata = decompositions_module.strassen_metadata
-            title = "Strassen's Algorithm (2x2x2, Float Coeffs)"
-        elif args.example == "minimal_float":
-            decomposition = decompositions_module.minimal_float_decomposition
-            metadata = decompositions_module.minimal_float_metadata
-            title = "Minimal 1x1x1 Algorithm (Float Coeffs)"
-        elif args.example == "standard_121":
-            decomposition = decompositions_module.standard_121_decomposition
-            metadata = decompositions_module.standard_121_metadata
-            title = "Standard 1x2x1 Algorithm"
-        
-        n_val, m_val, p_val, rank_val = metadata['n'], metadata['m'], metadata['p'], metadata['rank']
+        # Make sure your my_decompositions.py defines these structures
+        example_map = {
+            "strassen": (getattr(decompositions_module, 'decomposition_222', None), # Assuming decomposition_222 is Strassen
+                         getattr(decompositions_module, 'strassen_metadata', None)),
+            "minimal_float": (getattr(decompositions_module, 'minimal_float_decomposition', None),
+                              getattr(decompositions_module, 'minimal_float_metadata', None)),
+            "standard_121": (getattr(decompositions_module, 'standard_121_decomposition', None),
+                             getattr(decompositions_module, 'standard_121_metadata', None)),
+        }
+        if args.example not in example_map or example_map[args.example][0] is None or example_map[args.example][1] is None:
+            print(f"Error: Example '{args.example}' or its metadata not properly defined in my_decompositions.py.", file=sys.stderr)
+            return 1
 
-    elif args.decomp_file and args.decomp_var:
+        decomposition_data, metadata = example_map[args.example]
+        n_val, m_val, p_val, rank_val = metadata['n'], metadata['m'], metadata['p'], metadata['rank']
+        title = metadata.get('title', f"Algorithm for {args.example}")
+
+
+    elif args.decomp_file:
         if not os.path.exists(args.decomp_file):
-            print(f"Error: File not found: {args.decomp_file}")
-            return
-        
+            print(f"Error: File not found: {args.decomp_file}", file=sys.stderr)
+            return 1
+
         module_name = os.path.splitext(os.path.basename(args.decomp_file))[0]
         spec = importlib.util.spec_from_file_location(module_name, args.decomp_file)
         custom_module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(custom_module)
 
-        if not hasattr(custom_module, args.decomp_var):
-            print(f"Error: Variable '{args.decomp_var}' not found in {args.decomp_file}.")
-            return
-        decomposition = getattr(custom_module, args.decomp_var)
-        title = f"Algorithm from {args.decomp_file} ({args.decomp_var})"
+        if n_val is None: n_val = getattr(custom_module, 'n', None)
+        if m_val is None: m_val = getattr(custom_module, 'm', None)
+        if p_val is None: p_val = getattr(custom_module, 'p', None)
+        if rank_val is None: rank_val = getattr(custom_module, 'rank', None)
 
-        if args.metadata_var and hasattr(custom_module, args.metadata_var):
-            metadata = getattr(custom_module, args.metadata_var)
-            n_val, m_val, p_val = metadata.get('n'), metadata.get('m'), metadata.get('p')
-            rank_val = metadata.get('rank')
-        
-        # Override or provide missing n, m, p, rank from command line
-        if args.n is not None: n_val = args.n
-        if args.m is not None: m_val = args.m
-        if args.p is not None: p_val = args.p
-        if args.rank is not None: rank_val = args.rank
-        
-        if not all([isinstance(val, int) for val in [n_val, m_val, p_val]]):
-            print("Error: Dimensions n, m, p must be provided either via metadata or command line arguments.")
-            return
-        if rank_val is None: # Try to infer rank if not provided
-             if decomposition and len(decomposition) == 3 and decomposition[0] is not None:
-                 rank_val = decomposition[0].shape[1]
-             else:
-                 print("Error: Rank must be provided or inferable from decomposition.")
-                 return
-        if not isinstance(rank_val, int):
-            print("Error: Rank must be an integer.")
-            return
+        decomp_var_name_to_load = args.decomp_var
+        if not decomp_var_name_to_load:
+            if all(isinstance(x, int) and x > 0 for x in [n_val, m_val, p_val]): # n,m,p must be known
+                potential_name = f"decomposition_{n_val}{m_val}{p_val}"
+                if hasattr(custom_module, potential_name):
+                    decomp_var_name_to_load = potential_name
+                    print(f"Using inferred decomposition variable: {decomp_var_name_to_load}")
+
+        if not decomp_var_name_to_load:
+            print(f"Error: Could not determine decomposition variable name.", file=sys.stderr)
+            print("  Specify with --decomp_var or ensure n,m,p are known to infer 'decomposition_NMP'.", file=sys.stderr)
+            return 1
+
+        if not hasattr(custom_module, decomp_var_name_to_load):
+            print(f"Error: Variable '{decomp_var_name_to_load}' not found in {args.decomp_file}.", file=sys.stderr)
+            return 1
+        decomposition_data = getattr(custom_module, decomp_var_name_to_load)
+        title = f"Algorithm from {os.path.basename(args.decomp_file)} ({decomp_var_name_to_load})"
 
     else:
         parser.print_help()
-        print("\nNo decomposition source specified. Use --example or --decomp_file and --decomp_var.")
-        return
+        print("\nNo decomposition source specified. Use --example or --decomp_file.", file=sys.stderr)
+        return 1
 
-    if decomposition is None:
-        print("Error: Decomposition could not be loaded.")
-        return
+    # --- Validate dimensions ---
+    if not all(isinstance(x, int) and x > 0 for x in [n_val, m_val, p_val]):
+        print("Error: Dimensions n, m, p must be positive integers.", file=sys.stderr)
+        print(f"  Got: n={n_val}, m={m_val}, p={p_val}", file=sys.stderr)
+        return 1
 
+    if rank_val is None and decomposition_data:
+        try:
+            rank_val = decomposition_data[0].shape[1]
+            print(f"Inferred rank from decomposition: {rank_val}")
+        except (TypeError, IndexError, AttributeError):
+             print("Error: Could not infer rank from decomposition. Please specify --rank.", file=sys.stderr)
+             return 1
+    if not isinstance(rank_val, int) or rank_val < 0:
+        print(f"Error: Rank must be a non-negative integer. Got: {rank_val}", file=sys.stderr)
+        return 1
+
+    # --- Generate Algorithm Data ---
     try:
-        latex_steps = tensor_decomposition_to_latex_algorithm(decomposition, n_val, m_val, p_val, rank_val)
-        print_latex_document(latex_steps, title)
-    except ValueError as e:
-        print(f"Error during algorithm generation: {e}")
-    except Exception as e:
-        print(f"An unexpected error occurred: {e}")
+        # Ensure decomposition matrices are NumPy arrays if loaded from simple lists/tuples
+        u, v, w = decomposition_data
+        u_np = np.array(u, dtype=float) # Use float to allow nsimplify to work as expected
+        v_np = np.array(v, dtype=float)
+        w_np = np.array(w, dtype=float)
+        decomposition_data_np = (u_np, v_np, w_np)
 
+        algo_data = tensor_decomposition_to_algorithm_data(decomposition_data_np, n_val, m_val, p_val, rank_val)
+    except ValueError as e:
+        print(f"Error generating algorithm data: {e}", file=sys.stderr)
+        return 1
+    except Exception as e:
+        print(f"An unexpected error occurred during algorithm generation: {e}", file=sys.stderr)
+        import traceback
+        traceback.print_exc()
+        return 1
+
+    # --- Output LaTeX ---
+    latex_content = print_latex_document(
+        algo_data['latex_steps'],
+        title,
+        multiplications=algo_data['total_algo_multiplications']
+    )
+
+    if args.output_file:
+        tex_filename = args.output_file if args.output_file.endswith(".tex") else args.output_file + ".tex"
+        try:
+            with open(tex_filename, "w") as f:
+                f.write(latex_content)
+            print(f"LaTeX algorithm written to {tex_filename}")
+
+            if args.compile_latex:
+                print(f"Attempting to compile {tex_filename} with {args.latex_compiler}...")
+                # For Windows, shell=True might be needed if pdflatex is not directly in PATH in a complex way
+                # but generally, direct command is better.
+                # Use a temporary directory for compilation to keep main dir clean from aux files.
+                # However, for simplicity here, compiling in current dir.
+                # On Linux/macOS, os.path.dirname(os.path.abspath(tex_filename)) or "." is fine for cwd
+
+                # Compile twice
+                success = False
+                for i in range(2):
+                    compile_process = subprocess.run(
+                        [args.latex_compiler, "-interaction=nonstopmode", tex_filename],
+                        capture_output=True, text=True,
+                        cwd=os.path.dirname(os.path.abspath(tex_filename)) or "." # Run in file's dir
+                    )
+                    if compile_process.returncode == 0:
+                        success = True
+                    else:
+                        success = False
+                        break # Stop if first pass fails
+
+                if success:
+                    pdf_filename = tex_filename.replace(".tex", ".pdf")
+                    print(f"Compilation successful. Output: {pdf_filename}")
+                else:
+                    print(f"LaTeX compilation failed (return code {compile_process.returncode}).", file=sys.stderr)
+                    print("stdout:\n" + compile_process.stdout, file=sys.stderr)
+                    print("stderr:\n" + compile_process.stderr, file=sys.stderr)
+                    log_filename = tex_filename.replace(".tex", ".log")
+                    if os.path.exists(log_filename):
+                        print(f"\n--- Contents of {log_filename} (last 2000 chars) ---", file=sys.stderr)
+                        try:
+                            with open(log_filename, 'r') as log_f:
+                                log_content = log_f.read()
+                                print(log_content[-2000:], file=sys.stderr)
+                        except Exception as log_e:
+                            print(f"Error reading log file: {log_e}", file=sys.stderr)
+        except IOError as e:
+            print(f"Error writing to {tex_filename}: {e}", file=sys.stderr)
+            return 1
+    else:
+        print("\n--- LaTeX Output ---")
+        print(latex_content)
+        print("--------------------")
+        if args.compile_latex:
+            print("Note: --compile_latex requires --output_file to be specified.", file=sys.stderr)
+
+    # --- Optional Steps ---
+    if args.show_counts:
+        count_multiplications_in_steps(algo_data)
+
+    if args.verify:
+        verify_symbolically(n_val, m_val, p_val, algo_data)
+
+    return 0
 
 if __name__ == '__main__':
-    # Example of how to use the original verification function (not part of this script's main task)
-    # from the prompt, if you had it in a separate file or defined here.
-    # def verify_tensor_decomposition(...): ...
-    # verify_tensor_decomposition(decomp_s, n_s, m_s, p_s, rank_s)
-
-    main()
+    sys.exit(main())
