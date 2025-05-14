@@ -12,6 +12,12 @@ However, this decomposition is presented as a set of three numeric tensors.
 If you aren't familiar with tensor decomposition, it isn't obvious how this
 translates into a more efficient matrix multiplication algorithm.
 
+## Example
+
+An example of what the `<4,4,4>` decomposition looks like is in
+[444_decomposition.pdf](./444_decomposition.pdf). Note that SymPy uses 0-based indexing for the matrix
+entries (so, e.g., `A[0,0]` is the first element, `A[3,3]` is the last).
+
 ## Available Decompositions
 
 This repository includes:
