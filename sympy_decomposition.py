@@ -152,6 +152,44 @@ def print_latex_document(latex_steps: list[str], title: str = "Matrix Multiplica
     return "\n".join(doc)
 
 
+def generate_standard_matrix_multiplication(n: int, m: int, p: int) -> dict:
+    """
+    Generates the algorithm data for standard matrix multiplication with dimensions n×m * m×p.
+    """
+    A_sym = sympy.MatrixSymbol('A', n, m)
+    B_sym = sympy.MatrixSymbol('B', m, p)
+    C_sym = sympy.MatrixSymbol('C', n, p)
+
+    latex_steps = ["% Standard matrix multiplication algorithm C = A×B:"]
+
+    # For standard matrix multiplication, each element C_ik is the dot product of row i of A and column k of B
+    C_elements_expr_list = []
+
+    for i_row_C in range(n):
+        for k_col_C in range(p):
+            # C_ik = sum(A_ij * B_jk for j in range(m))
+            C_ik_expr = sympy.S.Zero
+            for j in range(m):
+                C_ik_expr += A_sym[i_row_C, j] * B_sym[j, k_col_C]
+
+            C_ik_expr_expanded = sympy.expand(C_ik_expr)
+            C_elements_expr_list.append(C_ik_expr_expanded)
+
+            # Add to LaTeX steps
+            latex_steps.append(f"{sympy.latex(C_sym[i_row_C, k_col_C])} &= {sympy.latex(C_ik_expr_expanded)}")
+
+    # Create an ImmutableMatrix of the symbolic expressions for C_ik
+    C_matrix_expr = sympy.ImmutableMatrix(n, p, C_elements_expr_list)
+
+    return {
+        'latex_steps': latex_steps,
+        'C_matrix_expr': C_matrix_expr,
+        'A_sym': A_sym,
+        'B_sym': B_sym,
+        'C_sym': C_sym,
+        'total_algo_multiplications': n * m * p  # Standard algorithm uses n*m*p multiplications
+    }
+
 def verify_symbolically(n: int, m: int, p: int, algo_data: dict):
     """
     Symbolically verifies if the decomposition correctly reconstructs A*B.
@@ -250,10 +288,70 @@ def main():
     parser.add_argument("--compile-latex", action='store_true', help="Attempt to compile the .tex file to .pdf.")
     parser.add_argument("--latex-compiler", type=str, default="pdflatex", help="LaTeX compiler command.")
     parser.add_argument("--show-counts", action='store_true', help="Show detailed SymPy multiplication counts.")
+    parser.add_argument("--show-standard", type=int, metavar="N", help="Output a PDF with the standard NxN matrix multiplication algorithm.")
 
 
     args = parser.parse_args()
 
+    # Handle --show-standard flag first, as it doesn't require a decomposition
+    if args.show_standard is not None:
+        n_size = args.show_standard
+        if n_size <= 0:
+            print(f"Error: --show-standard requires a positive integer. Got: {n_size}", file=sys.stderr)
+            return 1
+
+        # Generate standard matrix multiplication algorithm for n×n matrices
+        print(f"Generating standard {n_size}×{n_size} matrix multiplication algorithm...")
+        algo_data = generate_standard_matrix_multiplication(n_size, n_size, n_size)
+
+        # Determine output file basename for the standard algorithm
+        output_basename = f"standard_{n_size}x{n_size}" if args.output_file is None else args.output_file
+        title = f"Standard {n_size}×{n_size} Matrix Multiplication"
+
+        # Generate LaTeX content
+        latex_content = print_latex_document(
+            algo_data['latex_steps'],
+            title,
+            multiplications=algo_data['total_algo_multiplications']
+        )
+
+        tex_filename = output_basename if output_basename.endswith(".tex") else output_basename + ".tex"
+
+        # Always compile the LaTeX for --show-standard
+        try:
+            with open(tex_filename, "w") as f:
+                f.write(latex_content)
+            print(f"LaTeX algorithm written to {tex_filename}")
+
+            print(f"Compiling {tex_filename} with {args.latex_compiler}...")
+            # Compile twice for proper formatting
+            success = False
+            for i in range(2):
+                compile_process = subprocess.run(
+                    [args.latex_compiler, "-interaction=nonstopmode", tex_filename],
+                    capture_output=True, text=True,
+                    cwd=os.path.dirname(os.path.abspath(tex_filename)) or "."
+                )
+                if compile_process.returncode == 0:
+                    success = True
+                else:
+                    success = False
+                    break
+
+            if success:
+                pdf_filename = tex_filename.replace(".tex", ".pdf")
+                print(f"Compilation successful. Output: {pdf_filename}")
+            else:
+                print(f"LaTeX compilation failed (return code {compile_process.returncode}).", file=sys.stderr)
+                print("stdout:\n" + compile_process.stdout, file=sys.stderr)
+                print("stderr:\n" + compile_process.stderr, file=sys.stderr)
+        except IOError as e:
+            print(f"Error writing to {tex_filename}: {e}", file=sys.stderr)
+            return 1
+
+        return 0  # Exit after generating the standard algorithm
+
+    # Continue with normal decomposition processing
     decomposition_data = None
     n_val, m_val, p_val, rank_val = args.n, args.m, args.p, args.rank
     title = "Matrix multiplication decomposition"
@@ -318,7 +416,7 @@ def main():
             print(f"Error: Variable '{decomp_var_name_to_load}' not found in {args.decomp_file}.", file=sys.stderr)
             return 1
         decomposition_data = getattr(custom_module, decomp_var_name_to_load)
-        title = fr"$\langle{n_val},{m_val},{p_val}\rangle$ decomposition"
+        title = fr"$\langle{n_val},{m_val},{p_val}\rangle$ decomposition of AB"
 
     else:
         parser.print_help()

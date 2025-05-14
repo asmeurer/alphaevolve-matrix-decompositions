@@ -80,7 +80,7 @@ naive `AB` multiplication.
 ```
 usage: sympy_decomposition.py [-h] [--decomp-file DECOMP_FILE] [--decomp-var DECOMP_VAR] [--n N] [--m M] [--p P] [--rank RANK]
                               [--example {strassen,minimal_float,standard_121}] [--output-file OUTPUT_FILE] [--verify]
-                              [--compile-latex] [--latex-compiler LATEX_COMPILER] [--show-counts]
+                              [--compile-latex] [--latex-compiler LATEX_COMPILER] [--show-counts] [--show-standard N]
 ```
 
 | Option | Description |
@@ -97,6 +97,7 @@ usage: sympy_decomposition.py [-h] [--decomp-file DECOMP_FILE] [--decomp-var DEC
 | `--compile-latex` | Attempt to compile the .tex file to .pdf |
 | `--latex-compiler` | LaTeX compiler command. Default: pdflatex |
 | `--show-counts` | Show detailed SymPy multiplication counts |
+| `--show-standard N` | Output a PDF with the standard N×N matrix multiplication algorithm |
 
 ### Examples
 
@@ -118,6 +119,11 @@ python sympy_decomposition.py --example strassen --verify
 **Specify dimensions manually**:
 ```bash
 python sympy_decomposition.py --decomp-file my_decomposition.py --n 3 --m 3 --p 3 --rank 23
+```
+
+**Generate a PDF with standard matrix multiplication**:
+```bash
+python sympy_decomposition.py --show-standard 4
 ```
 
 ## Additional Resources
