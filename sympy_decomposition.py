@@ -6,18 +6,6 @@ import os
 import subprocess
 import sys
 
-def _get_sym_coeff(val):
-    """Converts a number to a SymPy exact Rational or Integer using nsimplify for floats."""
-    if isinstance(val, (float, np.floating)):
-        # nsimplify to find a simple symbolic representation (like fractions) for input float coefficients
-        simplified_val = sympy.nsimplify(val, rational=True)
-        # nsimplify might return a sympy.Float if it can't find a simple rational.
-        # In that case, fall back to direct Rational conversion.
-        if isinstance(simplified_val, sympy.Float):
-            return sympy.Rational(float(val))
-        return simplified_val
-    return sympy.S(val) # For integers, np.int, etc.
-
 def tensor_decomposition_to_algorithm_data(
     decomposition: tuple[np.ndarray, np.ndarray, np.ndarray],
     n: int, m: int, p: int, rank: int
@@ -51,7 +39,7 @@ def tensor_decomposition_to_algorithm_data(
         for i_row_A in range(n):
             for j_col_A in range(m):
                 coeff_val = factor_matrix_U[i_row_A * m + j_col_A, r_idx]
-                sym_coeff = _get_sym_coeff(coeff_val) # nsimplify applied here to individual coeffs
+                sym_coeff = sympy.nsimplify(coeff_val)
                 if sym_coeff != 0:
                     L_r_expr += sym_coeff * A_sym[i_row_A, j_col_A]
         # L_r_expr = sympy.expand(L_r_expr)
@@ -61,7 +49,7 @@ def tensor_decomposition_to_algorithm_data(
         for j_row_B in range(m):
             for k_col_B in range(p):
                 coeff_val = factor_matrix_V[j_row_B * p + k_col_B, r_idx]
-                sym_coeff = _get_sym_coeff(coeff_val) # nsimplify applied here
+                sym_coeff = sympy.nsimplify(coeff_val)
                 if sym_coeff != 0:
                     S_r_expr += sym_coeff * B_sym[j_row_B, k_col_B]
         # S_r_expr = sympy.expand(S_r_expr)
@@ -89,7 +77,7 @@ def tensor_decomposition_to_algorithm_data(
             has_any_term = False
             for r_idx in range(rank):
                 coeff_val = factor_matrix_W[k_col_C * n + i_row_C, r_idx]
-                sym_coeff = _get_sym_coeff(coeff_val) # nsimplify applied here
+                sym_coeff = sympy.nsimplify(coeff_val)
                 if sym_coeff != 0:
                     has_any_term = True
                     if rank > 0 : # Ensure M_symbols[r_idx] is valid
@@ -333,23 +321,14 @@ def main():
         return 1
 
     # --- Generate Algorithm Data ---
-    try:
-        # Ensure decomposition matrices are NumPy arrays if loaded from simple lists/tuples
-        u, v, w = decomposition_data
-        u_np = np.array(u, dtype=float) # Use float to allow nsimplify to work as expected
-        v_np = np.array(v, dtype=float)
-        w_np = np.array(w, dtype=float)
-        decomposition_data_np = (u_np, v_np, w_np)
+    # Ensure decomposition matrices are NumPy arrays if loaded from simple lists/tuples
+    u, v, w = decomposition_data
+    u_np = np.array(u)
+    v_np = np.array(v)
+    w_np = np.array(w)
+    decomposition_data_np = (u_np, v_np, w_np)
 
-        algo_data = tensor_decomposition_to_algorithm_data(decomposition_data_np, n_val, m_val, p_val, rank_val)
-    except ValueError as e:
-        print(f"Error generating algorithm data: {e}", file=sys.stderr)
-        return 1
-    except Exception as e:
-        print(f"An unexpected error occurred during algorithm generation: {e}", file=sys.stderr)
-        import traceback
-        traceback.print_exc()
-        return 1
+    algo_data = tensor_decomposition_to_algorithm_data(decomposition_data_np, n_val, m_val, p_val, rank_val)
 
     # --- Output LaTeX ---
     latex_content = print_latex_document(
