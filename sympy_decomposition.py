@@ -104,29 +104,52 @@ def tensor_decomposition_to_algorithm_data(
     }
 
 def print_latex_document(latex_steps: list[str], title: str = "Matrix Multiplication Algorithm", multiplications: int = None):
-    # ... (same as before) ...
     doc = [
         r"\documentclass{article}",
         r"\usepackage{amsmath}",
         r"\usepackage{amsfonts}",
         r"\usepackage{geometry}",
+        r"\usepackage{breqn}",  # Package for automatic line breaking of equations
         r"\geometry{a4paper, margin=1in}",
+        r"\setlength{\mathindent}{0pt}",  # Reduce indentation in math environments
+        r"\setlength{\textwidth}{6.5in}",  # Adjust text width
+        r"\setlength{\columnwidth}{6in}",  # Adjust column width for breqn
+        
+        # Allow line breaking within math expressions
+        r"\allowdisplaybreaks[4]",
+        
+        # Enable long equation breaking at operators
+        r"\interdisplaylinepenalty=2500",
+        
         r"\title{" + sympy.latex(title) + (f" ({multiplications} Multiplications)" if multiplications is not None else "") +r"}",
         r"\author{Tensor Decomposition Converter}",
         r"\date{\today}",
         r"\begin{document}",
-        r"\maketitle",
-        r"\begin{align*}"
+        r"\maketitle"
     ]
+    
+    # We'll use dmath* from breqn instead of align*
+    # This automatically breaks long equations
+    doc.append(r"% Equation steps:")
+    
     for step_latex in latex_steps:
         if step_latex.startswith("%"): # LaTeX comments
-            doc.append(f"  {step_latex}")
-        else: # Algorithm steps
-            doc.append(f"  {step_latex} \\\\") # Add \\ for line breaks in align*
-    doc.extend([
-        r"\end{align*}",
-        r"\end{document}"
-    ])
+            doc.append(f"{step_latex}")
+            continue
+            
+        # Extract left and right parts of the equation (separated by &=)
+        if "&=" in step_latex:
+            left_side, right_side = step_latex.split("&=", 1)
+            doc.append(r"\begin{dmath*}")
+            doc.append(f"{left_side.strip()} = {right_side.strip()}")
+            doc.append(r"\end{dmath*}")
+        else:
+            # For lines without &=, just wrap in dmath*
+            doc.append(r"\begin{dmath*}")
+            doc.append(step_latex)
+            doc.append(r"\end{dmath*}")
+    
+    doc.append(r"\end{document}")
     return "\n".join(doc)
 
 
