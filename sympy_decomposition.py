@@ -212,8 +212,8 @@ def count_multiplications_in_steps(algo_data: dict):
 def main():
     parser = argparse.ArgumentParser(description="Convert tensor decomposition to LaTeX algorithm and optionally verify/compile.")
     # ... (Arguments same as before) ...
-    parser.add_argument("--decomp_file", type=str, help="Path to Python file with decomposition data.")
-    parser.add_argument("--decomp_var", type=str, help="Variable name for the (U,V,W) tuple in the file.")
+    parser.add_argument("--decomp-file", type=str, help="Path to Python file with decomposition data.")
+    parser.add_argument("--decomp-var", type=str, help="Variable name for the (U,V,W) tuple in the file.")
     parser.add_argument("--n", type=int, help="Dimension n (rows of A).")
     parser.add_argument("--m", type=int, help="Dimension m (cols of A / rows of B).")
     parser.add_argument("--p", type=int, help="Dimension p (cols of B).")
@@ -223,11 +223,11 @@ def main():
                         choices=["strassen", "minimal_float", "standard_121"],
                         help="Run a built-in example from my_decompositions.py (requires the file).")
 
-    parser.add_argument("--output_file", "-o", type=str, help="Base name for output .tex file (e.g., 'my_algo').")
+    parser.add_argument("--output-file", "-o", type=str, default='out', help="Base name for output .tex file (e.g., 'my_algo').")
     parser.add_argument("--verify", action='store_true', help="Perform symbolic verification of the decomposition.")
-    parser.add_argument("--compile_latex", action='store_true', help="Attempt to compile the .tex file to .pdf.")
-    parser.add_argument("--latex_compiler", type=str, default="pdflatex", help="LaTeX compiler command.")
-    parser.add_argument("--show_counts", action='store_true', help="Show detailed SymPy multiplication counts.")
+    parser.add_argument("--compile-latex", action='store_true', help="Attempt to compile the .tex file to .pdf.")
+    parser.add_argument("--latex-compiler", type=str, default="pdflatex", help="LaTeX compiler command.")
+    parser.add_argument("--show-counts", action='store_true', help="Show detailed SymPy multiplication counts.")
 
 
     args = parser.parse_args()
@@ -337,7 +337,7 @@ def main():
         multiplications=algo_data['total_algo_multiplications']
     )
 
-    if args.output_file:
+    if args.compile_latex:
         tex_filename = args.output_file if args.output_file.endswith(".tex") else args.output_file + ".tex"
         try:
             with open(tex_filename, "w") as f:
@@ -386,11 +386,10 @@ def main():
             print(f"Error writing to {tex_filename}: {e}", file=sys.stderr)
             return 1
     else:
-        print("\n--- LaTeX Output ---")
-        print(latex_content)
-        print("--------------------")
-        if args.compile_latex:
-            print("Note: --compile_latex requires --output_file to be specified.", file=sys.stderr)
+        if not args.show_counts and not args.verify:
+            print("\n--- LaTeX Output ---")
+            print(latex_content)
+            print("--------------------")
 
     # --- Optional Steps ---
     if args.show_counts:
