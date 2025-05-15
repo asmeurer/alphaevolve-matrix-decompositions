@@ -16,8 +16,10 @@ def tensor_decomposition_to_algorithm_data(
     """
     factor_matrix_U, factor_matrix_V, factor_matrix_W = decomposition
 
-    A_sym = sympy.MatrixSymbol('A', n, m)
-    B_sym = sympy.MatrixSymbol('B', m, p)
+    # A_sym = sympy.MatrixSymbol('A', n, m)
+    # B_sym = sympy.MatrixSymbol('B', m, p)
+    A_sym = sympy.IndexedBase("A", commutative=False)
+    B_sym = sympy.IndexedBase("B", commutative=False)
     C_sym = sympy.MatrixSymbol('C', n, p) # Used for LaTeX representation of C_ik
 
     if rank == 0:
